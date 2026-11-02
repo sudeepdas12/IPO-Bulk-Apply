@@ -1,0 +1,6 @@
+# Demats Account Configuration Template
+# Format: Name, CapitalID, Username, Password, Bank, Kitta, CRN, TXN_PIN, [Branch], [Company]
+#
+# Examples:
+# Ram Sharma, 13010100, 12345678, SecretPass@1, NIC ASIA BANK LTD, 10, 1234567890, 1234, Kathmandu Branch,
+# Sita Thapa, 13016500, 87654321, MyPass@456, GLOBAL IME BANK LTD, 10, 0987654321, 5678, Lalitpur Branch,

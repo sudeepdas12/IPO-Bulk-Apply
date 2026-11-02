@@ -1,0 +1,44 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv*/
+
+# Build and Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing and Type checking
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local sensitive configuration and demats (CRITICAL: Never commit credentials)
+demats.txt
+_demats.txt
+demats_tmp_*.txt
+history_tmp_*.json
+*.env
+.env
+data/cdsc_cooldown.json
+data/history.json
+data/cached_allotment_companies.json
+meroshare-bot-master/demats.txt
+meroshare-bot-master/data/cdsc_cooldown.json
+meroshare-bot-master/data/history.json
+meroshare-bot-master/data/cached_allotment_companies.json
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db

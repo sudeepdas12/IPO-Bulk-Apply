@@ -1,0 +1,38 @@
+name: Build & publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip build
+
+      - name: Build sdist & wheel
+        run: |
+          python -m build --sdist --wheel
+
+      - name: Upload dist as workflow artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Publish to PyPI
+        if: ${{ secrets.PYPI_API_TOKEN != '' }}
+        uses: pypa/gh-action-pypi-publish@v1.5.1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}

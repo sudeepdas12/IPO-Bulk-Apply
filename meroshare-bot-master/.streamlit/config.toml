@@ -1,0 +1,81 @@
+[logger]
+level = "info"
+hideWelcomeMessage = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false
+
+[server]
+headless = false
+enableCORS = false
+enableXsrfProtection = false
+
+# Locked Theme: Main page is locked to clean light mode; Sidebar is locked to Midnight Navy
+[theme]
+base = "light"
+primaryColor = "#1D4ED8"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#FFFFFF"
+codeBackgroundColor = "#F1F5F9"
+textColor = "#0F172A"
+linkColor = "#1D4ED8"
+borderColor = "#E2E8F0"
+codeTextColor = "#334155"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "10px"
+buttonRadius = "10px"
+
+# Premium Modern Typography (Plus Jakarta Sans + JetBrains Mono)
+font = "'Plus Jakarta Sans':https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+headingFont = "'Plus Jakarta Sans':https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap"
+baseFontSize = 15
+baseFontWeight = 400
+codeFontSize = "13px"
+headingFontSizes = ["28px", "22px", "18px", "16px", "14px", "12px"]
+headingFontWeights = [800, 700, 700, 600, 600, 500]
+metricValueFontSize = "2rem"
+metricValueFontWeight = 800
+linkUnderline = false
+paddingTop = "1rem"
+paddingBottom = "3rem"
+
+# Semantic Financial Indicators
+greenColor = "#059669"
+redColor = "#DC2626"
+yellowColor = "#D97706"
+orangeColor = "#EA580C"
+blueColor = "#1D4ED8"
+violetColor = "#6366F1"
+grayColor = "#64748B"
+
+chartCategoricalColors = [
+    "#1D4ED8",
+    "#059669",
+    "#6366F1",
+    "#D97706",
+    "#DC2626",
+    "#0284C7",
+    "#64748B",
+]
+
+dataframeBorderColor = "#E2E8F0"
+dataframeHeaderBackgroundColor = "#F8FAFC"
+dataframeHeaderTextColor = "#0F172A"
+
+# Dark Midnight Navy Sidebar (Locked)
+[theme.sidebar]
+backgroundColor = "#0A192F"
+secondaryBackgroundColor = "#112240"
+codeBackgroundColor = "#112240"
+textColor = "#F8FAFC"
+borderColor = "#1E3A5F"
+primaryColor = "#38BDF8"
+linkColor = "#60A5FA"
+paddingTop = "0.75rem"
+paddingBottom = "2rem"

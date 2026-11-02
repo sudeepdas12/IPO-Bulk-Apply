@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meroshare-bot"
+version = "0.0.9"
+description = "Multi-Account Automated IPO Application and Allotment Management Suite for Nepal Capital Market"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Er. Sudeep Das" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "click>=8.1.3",
+    "neotermcolor>=2.0.10",
+    "playwright>=1.40.0",
+    "tabulate>=0.9.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+]
+
+[project.optional-dependencies]
+dashboard = [
+    "streamlit>=1.30.0",
+    "pandas>=2.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+    "types-requests>=2.31.0",
+]
+all = [
+    "meroshare-bot[dashboard,dev]",
+]
+
+[project.scripts]
+meroshare-bot = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bot*", "app*"]
+
+[tool.setuptools.package-data]
+bot = ["demats.txt", "config.ini", "run_bot.bat", "install_playwright.bat"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    ".venv*",
+    ".agents",
+    ".claude",
+    "build",
+    "dist",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501", "E402", "W291", "W293"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+exclude = [
+    '^\.venv',
+    '^\.agents',
+    '^build',
+    '^dist',
+]

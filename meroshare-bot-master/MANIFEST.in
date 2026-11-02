@@ -1,0 +1,7 @@
+include demats.txt
+include config.ini
+include run_bot.bat
+include requirements.txt
+include install_playwright.bat
+recursive-include bot *.txt *.ini *.bat
+recursive-include scripts *.py *.bat *.ps1

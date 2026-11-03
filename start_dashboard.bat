@@ -34,7 +34,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo Launching Web Dashboard in your browser...
 echo.
 
-"%PYTHON_EXE%" -m streamlit run "meroshare-bot-master\app\dashboard.py" --server.headless=false --browser.gatherUsageStats=false --logger.hideWelcomeMessage=true --client.toolbarMode=minimal
+"%PYTHON_EXE%" -m streamlit run "meroshare-bot-master\app\dashboard.py" --server.address=127.0.0.1 --server.headless=false --browser.gatherUsageStats=false --logger.hideWelcomeMessage=true --client.toolbarMode=minimal
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

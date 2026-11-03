@@ -132,155 +132,221 @@ def _execute_portfolio_sync(accounts: List[Dict[str, Any]], api_client: Meroshar
     fail_count = 0
     circuit_breaker_triggered = False
 
-    for idx, acc in enumerate(accounts):
-        acc_name = acc.get("name", f"Account #{idx+1}")
-        cap_id = str(acc.get("capital_id") or acc.get("capitalid") or acc.get("CapitalID") or "").strip()
-        user = str(acc.get("username") or acc.get("Username") or "").strip()
-        pwd = str(acc.get("password") or acc.get("Password") or "").strip()
+    # Initialize batch browser context to allow fast (~0.2s) WAF-bypassed portfolio fetching
+    browser_proc = None
+    browser_page = None
+    playwright_ctx = None
+    try:
+        from bot.cdsc_browser_checker import find_browser_executable, find_free_port
+        from playwright.sync_api import sync_playwright
+        import subprocess, tempfile
 
-        # Fallback to extract DP ID if 16-digit BOID is present
-        if not cap_id and acc.get("boid"):
-            boid_clean = "".join(filter(str.isdigit, str(acc.get("boid"))))
-            if len(boid_clean) == 16:
-                cap_id = boid_clean[:8]
-                if not user:
-                    user = boid_clean[8:]
+        exe = find_browser_executable()
+        if exe:
+            port = find_free_port()
+            tmp_dir = tempfile.mkdtemp(prefix="ms_batch_port_")
+            browser_proc = subprocess.Popen(
+                [exe, f"--remote-debugging-port={port}", f"--user-data-dir={tmp_dir}", "--headless=new", "about:blank"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(1.0)
+            playwright_ctx = sync_playwright().start()
+            browser_conn = playwright_ctx.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            browser_page = browser_conn.contexts[0].new_page()
+            browser_page.goto("https://meroshare.cdsc.com.np/", timeout=15000)
+    except Exception as exc:
+        logger.warning("Could not pre-initialize batch browser session for portfolio: %s", exc)
 
-        if not cap_id:
-            fail_count += 1
-            account_breakdown.append({
-                "account_name": acc_name,
-                "username": user,
-                "status": "FAILED",
-                "error": "Capital ID / DP code is missing in account configuration. Please edit this account in Accounts tab.",
-                "items": [],
-                "total_value": 0.0,
-                "total_units": 0,
-            })
-            continue
+    try:
+        for idx, acc in enumerate(accounts):
+            acc_name = acc.get("name", f"Account #{idx+1}")
+            cap_id = str(acc.get("capital_id") or acc.get("capitalid") or acc.get("CapitalID") or "").strip()
+            user = str(acc.get("username") or acc.get("Username") or "").strip()
+            pwd = str(acc.get("password") or acc.get("Password") or "").strip()
 
-        progress_pct = int(((idx) / total_accs) * 100)
-        progress_bar.progress(progress_pct, text=f"Querying [{idx+1}/{total_accs}]: {acc_name} ({user})...")
+            # Fallback to extract DP ID if 16-digit BOID is present
+            if not cap_id and acc.get("boid"):
+                boid_clean = "".join(filter(str.isdigit, str(acc.get("boid"))))
+                if len(boid_clean) == 16:
+                    cap_id = boid_clean[:8]
+                    if not user:
+                        user = boid_clean[8:]
 
-        # Login
-        ok, msg, token = api_client.login(cap_id, user, pwd)
-        if not ok or not token:
-            fail_count += 1
-            is_cooldown = "cooldown" in msg.lower() or "firewall" in msg.lower() or "rejected" in msg.lower()
-            acc_status = "IP_COOLDOWN" if is_cooldown else "FAILED"
-
-            account_breakdown.append({
-                "account_name": acc_name,
-                "username": user,
-                "status": acc_status,
-                "error": msg,
-                "items": [],
-                "total_value": 0.0,
-                "total_units": 0,
-            })
-
-            # Circuit breaker: stop on first IP cooldown response
-            if is_cooldown:
-                circuit_breaker_triggered = True
-                cooldown_mgr.record_cooldown(reason=msg, duration_minutes=15)
-                # Defer remaining accounts
-                for rem_idx in range(idx + 1, total_accs):
-                    rem_acc = accounts[rem_idx]
-                    rem_name = rem_acc.get("name", f"Account #{rem_idx+1}")
-                    rem_user = rem_acc.get("username", "")
-                    account_breakdown.append({
-                        "account_name": rem_name,
-                        "username": rem_user,
-                        "status": "DEFERRED_IP_COOLDOWN",
-                        "error": "CDSC temporarily blocked this IP. Remaining accounts were not attempted.",
-                        "items": [],
-                        "total_value": 0.0,
-                        "total_units": 0,
-                    })
-                break
-            continue
-
-        # Get own detail for demat / boid and clientCode
-        user_detail = api_client.get_user_details(token)
-        demat = ""
-        client_code = ""
-        if user_detail:
-            demat = str(user_detail.get("demat") or user_detail.get("boid") or "")
-            client_code = str(user_detail.get("clientCode") or "")
-
-        # Query portfolio
-        port_res = api_client.get_portfolio(token, demat=demat, client_code=client_code)
-        if not port_res:
-            fail_count += 1
-            account_breakdown.append({
-                "account_name": acc_name,
-                "username": user,
-                "status": "FAILED",
-                "error": "Failed to load portfolio response from Meroshare",
-                "items": [],
-                "total_value": 0.0,
-                "total_units": 0,
-            })
-            continue
-
-        success_count += 1
-
-        # Extract portfolio list
-        items = port_res.get("meroSharePortfolio") or port_res.get("object") or []
-        if isinstance(items, dict):
-            items = [items]
-
-        acc_total_value = float(port_res.get("totalValueOfLastTransPrice") or port_res.get("totalValueAsOfPreviousClosingPrice") or 0.0)
-        acc_total_units = 0
-        parsed_items: List[Dict[str, Any]] = []
-
-        for it in items:
-            scrip = str(it.get("script") or it.get("scrip") or "").strip().upper()
-            if not scrip:
+            if not cap_id:
+                fail_count += 1
+                account_breakdown.append({
+                    "account_name": acc_name,
+                    "username": user,
+                    "status": "FAILED",
+                    "error": "Capital ID / DP code is missing in account configuration. Please edit this account in Accounts tab.",
+                    "items": [],
+                    "total_value": 0.0,
+                    "total_units": 0,
+                })
                 continue
 
-            desc = str(it.get("scriptDesc") or it.get("companyName") or scrip).strip()
-            units = int(it.get("currentBalance") or it.get("balance") or 0)
-            ltp = float(it.get("lastTransactionPrice") or it.get("previousClosingPrice") or 0.0)
-            val = float(it.get("valueOfLastTransPrice") or it.get("valueAsOfPreviousClosingPrice") or (units * ltp))
+            progress_pct = int(((idx) / total_accs) * 100)
+            progress_bar.progress(progress_pct, text=f"Querying [{idx+1}/{total_accs}]: {acc_name} ({user})...")
 
-            acc_total_units += units
-            parsed_items.append({
-                "scrip": scrip,
-                "company_name": desc,
-                "units": units,
-                "ltp": ltp,
-                "value": val,
-            })
+            # Login
+            ok, msg, token = api_client.login(cap_id, user, pwd)
+            if not ok or not token:
+                fail_count += 1
+                is_cooldown = "cooldown" in msg.lower() or "firewall" in msg.lower() or "rejected" in msg.lower()
+                acc_status = "IP_COOLDOWN" if is_cooldown else "FAILED"
 
-            # Merge into consolidated scrips
-            if scrip not in consolidated_scrips:
-                consolidated_scrips[scrip] = {
+                account_breakdown.append({
+                    "account_name": acc_name,
+                    "username": user,
+                    "status": acc_status,
+                    "error": msg,
+                    "items": [],
+                    "total_value": 0.0,
+                    "total_units": 0,
+                })
+
+                # Circuit breaker: stop on first IP cooldown response
+                if is_cooldown:
+                    circuit_breaker_triggered = True
+                    cooldown_mgr.record_cooldown(reason=msg, duration_minutes=15)
+                    # Defer remaining accounts
+                    for rem_idx in range(idx + 1, total_accs):
+                        rem_acc = accounts[rem_idx]
+                        rem_name = rem_acc.get("name", f"Account #{rem_idx+1}")
+                        rem_user = rem_acc.get("username", "")
+                        account_breakdown.append({
+                            "account_name": rem_name,
+                            "username": rem_user,
+                            "status": "DEFERRED_IP_COOLDOWN",
+                            "error": "CDSC temporarily blocked this IP. Remaining accounts were not attempted.",
+                            "items": [],
+                            "total_value": 0.0,
+                            "total_units": 0,
+                        })
+                    break
+                continue
+
+            # Get own detail for demat / boid and clientCode
+            user_detail = api_client.get_user_details(token)
+            demat = ""
+            client_code = ""
+            if user_detail:
+                demat = str(user_detail.get("demat") or user_detail.get("boid") or "")
+                client_code = str(user_detail.get("clientCode") or "")
+
+            # Query portfolio with authentic browser fallback if CDSC WAF blocks direct REST endpoint
+            account_creds = {"capital_id": cap_id, "username": user, "password": pwd}
+            port_res = api_client.get_portfolio(
+                token,
+                demat=demat,
+                client_code=client_code,
+                account_creds=account_creds,
+                browser_page=browser_page,
+            )
+            if not port_res:
+                fail_count += 1
+                account_breakdown.append({
+                    "account_name": acc_name,
+                    "username": user,
+                    "status": "FAILED",
+                    "error": "Failed to load portfolio response from Meroshare (CDSC firewall or session rejected)",
+                    "items": [],
+                    "total_value": 0.0,
+                    "total_units": 0,
+                })
+                continue
+
+            success_count += 1
+
+            # Extract portfolio list (CDSC uses meroShareMyPortfolio as primary key)
+            items = (
+                port_res.get("meroShareMyPortfolio")
+                or port_res.get("meroSharePortfolio")
+                or port_res.get("object")
+                or []
+            )
+            if isinstance(items, dict):
+                items = [items]
+
+            raw_val = (
+                port_res.get("totalValueOfLastTransPrice")
+                or port_res.get("totalValueOfPrevClosingPrice")
+                or port_res.get("totalValueAsOfPreviousClosingPrice")
+                or 0.0
+            )
+            acc_total_value = float(raw_val) if raw_val else 0.0
+            acc_total_units = 0
+            parsed_items: List[Dict[str, Any]] = []
+
+            for it in items:
+                scrip = str(it.get("script") or it.get("scrip") or "").strip().upper()
+                if not scrip:
+                    continue
+
+                desc = str(it.get("scriptDesc") or it.get("companyName") or scrip).strip()
+                units = int(float(it.get("currentBalance") or it.get("balance") or 0))
+                ltp = float(it.get("lastTransactionPrice") or it.get("previousClosingPrice") or 0.0)
+                val = float(
+                    it.get("valueOfLastTransPrice")
+                    or it.get("valueOfPrevClosingPrice")
+                    or it.get("valueAsOfLastTransactionPrice")
+                    or (units * ltp)
+                )
+
+                acc_total_units += units
+                parsed_items.append({
                     "scrip": scrip,
                     "company_name": desc,
-                    "total_units": 0,
+                    "units": units,
                     "ltp": ltp,
-                    "total_value": 0.0,
-                    "holdings": [],
-                }
+                    "value": val,
+                })
 
-            consolidated_scrips[scrip]["total_units"] += units
-            consolidated_scrips[scrip]["total_value"] += val
-            consolidated_scrips[scrip]["holdings"].append(f"{acc_name}: {units:,}")
-            if ltp > 0:
-                consolidated_scrips[scrip]["ltp"] = ltp
+                # Merge into consolidated scrips
+                if scrip not in consolidated_scrips:
+                    consolidated_scrips[scrip] = {
+                        "scrip": scrip,
+                        "company_name": desc,
+                        "total_units": 0,
+                        "ltp": ltp,
+                        "total_value": 0.0,
+                        "holdings": [],
+                    }
 
-        account_breakdown.append({
-            "account_name": acc_name,
-            "username": user,
-            "status": "SUCCESS",
-            "error": "",
-            "items": parsed_items,
-            "total_value": acc_total_value if acc_total_value > 0 else sum(i["value"] for i in parsed_items),
-            "total_units": acc_total_units,
-        })
+                consolidated_scrips[scrip]["total_units"] += units
+                consolidated_scrips[scrip]["total_value"] += val
+                consolidated_scrips[scrip]["holdings"].append(f"{acc_name}: {units:,}")
+                if ltp > 0:
+                    consolidated_scrips[scrip]["ltp"] = ltp
 
-        time.sleep(3.0)
+            account_breakdown.append({
+                "account_name": acc_name,
+                "username": user,
+                "status": "SUCCESS",
+                "error": "",
+                "items": parsed_items,
+                "total_value": acc_total_value if acc_total_value > 0 else sum(i["value"] for i in parsed_items),
+                "total_units": acc_total_units,
+            })
+
+            time.sleep(1.0)
+    finally:
+        if browser_page:
+            try:
+                browser_page.close()
+            except Exception:
+                pass
+        if playwright_ctx:
+            try:
+                playwright_ctx.stop()
+            except Exception:
+                pass
+        if browser_proc:
+            try:
+                browser_proc.kill()
+            except Exception:
+                pass
 
     progress_bar.progress(100, text="Portfolio sync complete!")
     if circuit_breaker_triggered:

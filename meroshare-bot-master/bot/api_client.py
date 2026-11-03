@@ -259,10 +259,133 @@ class MeroshareAPIClient:
             raise MeroshareNetworkError(f"Could not load bank accounts: {exc}") from exc
         return []
 
-    def get_portfolio(self, token: str, demat: str, client_code: str = "") -> Optional[Dict[str, Any]]:
+    def get_portfolio_via_browser(
+        self,
+        token: str = "",
+        demat: str = "",
+        client_code: str = "",
+        page: Any = None,
+        capital_id: str = "",
+        username: str = "",
+        password: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fallback portfolio fetcher via authentic Chrome/Edge browser context.
+        Bypasses F5 BIG-IP ASM WAF on /api/meroShareView/myPortfolio/ by executing fetch()
+        within an authentic browser session origin (https://meroshare.cdsc.com.np/).
+        If an active Playwright `page` is provided, reuses it immediately (completes in ~0.2s).
+        Otherwise launches a temporary headless Chrome session via CDP.
+        """
+        fetch_js = """async (args) => {
+            let [tok, dmt, cc] = args;
+            let res = await fetch('https://webbackend.cdsc.com.np/api/meroShareView/myPortfolio/', {
+                method: 'POST',
+                headers: {
+                    'Authorization': tok,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    sortBy: 'script',
+                    demat: [dmt],
+                    clientCode: cc,
+                    page: 1,
+                    size: 500,
+                    sortAsc: true
+                })
+            });
+            if (!res.ok) return {error: `myPortfolio returned status ${res.status}`};
+            return await res.json();
+        }"""
+
+        # Fast path: existing browser page provided (e.g. from batch portfolio sync)
+        if page:
+            try:
+                if not page.url.startswith("https://meroshare.cdsc.com.np"):
+                    page.goto("https://meroshare.cdsc.com.np/", timeout=15000)
+                data = page.evaluate(fetch_js, [token, demat, client_code])
+                if isinstance(data, dict) and ("meroShareMyPortfolio" in data or "meroSharePortfolio" in data):
+                    return data
+                elif isinstance(data, dict) and "error" in data:
+                    logger.warning("Browser portfolio JS error: %s", data["error"])
+            except Exception as exc:
+                logger.warning("Fast-path browser portfolio query failed: %s", exc)
+
+        # Standalone path: spin up headless Chrome session
+        try:
+            from bot.cdsc_browser_checker import find_browser_executable, find_free_port
+            from playwright.sync_api import sync_playwright
+            import subprocess, tempfile
+
+            exe = find_browser_executable()
+            if not exe:
+                logger.warning("No Chrome/Edge executable found for browser portfolio fallback")
+                return None
+
+            port = find_free_port()
+            tmp_dir = tempfile.mkdtemp(prefix="ms_port_")
+            proc = subprocess.Popen(
+                [exe, f"--remote-debugging-port={port}", f"--user-data-dir={tmp_dir}", "--headless=new", "about:blank"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(1.0)
+            try:
+                with sync_playwright() as p:
+                    browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+                    bpage = browser.contexts[0].new_page()
+                    bpage.goto("https://meroshare.cdsc.com.np/", timeout=20000)
+
+                    # If token already exists, perform direct token fetch
+                    if token and demat:
+                        data = bpage.evaluate(fetch_js, [token, demat, client_code])
+                    elif capital_id and username and password:
+                        # Fallback to UI form login if no token provided
+                        from bot.func import login
+                        dp = capital_id[3:] if capital_id.startswith("130") else capital_id
+                        bpage.goto("https://meroshare.cdsc.com.np/#/login", timeout=20000)
+                        login(bpage, dp, username, password)
+                        time.sleep(1.5)
+                        login_js = """async () => {
+                            let tok = sessionStorage.getItem('Authorization') || localStorage.getItem('Authorization');
+                            if (!tok) return {"error": "Token not found in browser storage after login"};
+                            let uRes = await fetch('https://webbackend.cdsc.com.np/api/meroShare/ownDetail/', {headers: {'Authorization': tok}});
+                            if (!uRes.ok) return {"error": `ownDetail returned status ${uRes.status}`};
+                            let user = await uRes.json();
+                            let pRes = await fetch('https://webbackend.cdsc.com.np/api/meroShareView/myPortfolio/', {
+                                method: 'POST',
+                                headers: {'Authorization': tok, 'Content-Type': 'application/json'},
+                                body: JSON.stringify({sortBy: 'script', demat: [user.demat], clientCode: user.clientCode, page: 1, size: 500, sortAsc: true})
+                            });
+                            if (!pRes.ok) return {"error": `myPortfolio returned status ${pRes.status}`};
+                            return await pRes.json();
+                        }"""
+                        data = bpage.evaluate(login_js)
+                    else:
+                        data = None
+
+                    browser.close()
+                    if isinstance(data, dict) and ("meroShareMyPortfolio" in data or "meroSharePortfolio" in data):
+                        return data
+                    elif isinstance(data, dict) and "error" in data:
+                        logger.warning("Browser portfolio JS error: %s", data["error"])
+            finally:
+                proc.kill()
+        except Exception as exc:
+            logger.error("Browser-assisted portfolio fetch failed: %s", exc)
+        return None
+
+    def get_portfolio(
+        self,
+        token: str,
+        demat: str,
+        client_code: str = "",
+        account_creds: Optional[Dict[str, str]] = None,
+        browser_page: Any = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Fetch user's stock holdings and portfolio valuation from Meroshare.
         Returns dict containing holding rows and aggregate valuation, or None on error.
+        Automatically falls back to browser-assisted query if CDSC WAF blocks direct REST call.
         """
         url = f"{BASE_URL}/meroShareView/myPortfolio/"
         headers = {"Authorization": token}
@@ -289,8 +412,21 @@ class MeroshareAPIClient:
                     return data_alt
             logger.warning("Portfolio endpoint responded with status %d", resp.status_code)
         except Exception as exc:
-            logger.warning("Could not fetch portfolio for DEMAT %s: %s", demat, exc)
-        return None
+            logger.warning("Could not fetch portfolio for DEMAT %s via API: %s", demat, exc)
+
+        # Fallback to authentic headless browser context to bypass F5 BIG-IP WAF block on myPortfolio/
+        cap = (account_creds or {}).get("capital_id", "")
+        usr = (account_creds or {}).get("username", "")
+        pwd = (account_creds or {}).get("password", "")
+        return self.get_portfolio_via_browser(
+            token=token,
+            demat=demat,
+            client_code=client_code,
+            page=browser_page,
+            capital_id=cap,
+            username=usr,
+            password=pwd,
+        )
 
     def check_application_status(self, token: str, company_share_id: int) -> Optional[Dict[str, Any]]:
         """Check if user has already applied or get application status."""

@@ -1,4 +1,4 @@
-name: Build, Test & Publish
+name: CI & Quality Pipeline
 
 on:
   push:
@@ -30,25 +30,26 @@ jobs:
 
       - name: Run Ruff Lint Checks
         run: |
-          python -m ruff check bot/ app/ ../tests/
+          python -m ruff check meroshare-bot-master/ tests/
 
       - name: Run Mypy Type Analysis
         run: |
-          python -m mypy bot app ../tests
+          python -m mypy meroshare-bot-master/bot meroshare-bot-master/app tests
 
       - name: Run Pytest Suite
         run: |
-          python -m pytest ../tests/ -v
+          python -m pytest tests/ -v
 
-      - name: Build sdist & wheel
+      - name: Build sdist and wheel
         run: |
+          cd meroshare-bot-master
           python -m build --sdist --wheel
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/*
+          path: meroshare-bot-master/dist/*
 
   publish:
     name: Publish to PyPI

@@ -90,6 +90,7 @@ def test_api_client_get_applicable_issues():
     client = MeroshareAPIClient()
     mock_response = MagicMock()
     mock_response.status_code = 200
+    mock_response.text = '{"object": []}'
     mock_response.json.return_value = {
         "object": [
             {
@@ -114,6 +115,7 @@ def test_api_client_check_application_status():
     client = MeroshareAPIClient()
     mock_response = MagicMock()
     mock_response.status_code = 200
+    mock_response.text = '{"object": []}'
     mock_response.json.return_value = {
         "statusName": "APPLIED",
         "appliedKitta": 10,

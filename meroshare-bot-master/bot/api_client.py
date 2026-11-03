@@ -229,16 +229,17 @@ class MeroshareAPIClient:
         try:
             resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload)
             if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, dict):
-                    obj = data.get("object", [])
-                    return obj if isinstance(obj, list) else []
-                elif isinstance(data, list):
-                    return data
-            logger.warning("applicableIssue responded with status %d", resp.status_code)
+                body_str = resp.text.strip()
+                if "rejected" not in body_str.lower() and (body_str.startswith("{") or body_str.startswith("[")):
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        obj = data.get("object", [])
+                        return obj if isinstance(obj, list) else []
+                    elif isinstance(data, list):
+                        return data
+            logger.warning("applicableIssue responded with status %d: %s", resp.status_code, resp.text[:120])
         except Exception as exc:
-            logger.error("Error retrieving applicable issues: %s", exc)
-            raise MeroshareNetworkError(f"Could not load applicable issues from Meroshare: {exc}") from exc
+            logger.warning("Could not retrieve applicable issues via API: %s", exc)
         return []
 
     def get_banks(self, token: str) -> List[Dict[str, Any]]:

@@ -16,18 +16,25 @@ set "STREAMLIT_LOGGER_HIDE_WELCOME_MESSAGE=true"
 set "STREAMLIT_BROWSER_GATHER_USAGE_STATS=false"
 set "STREAMLIT_CLIENT_TOOLBAR_MODE=minimal"
 
-:: 1. Determine base Python candidate
+:: 1. Priority 1: Check for pre-bundled standalone portable runtime
+if exist "%~dp0portable_runtime\python.exe" (
+    set "PYTHON_EXE=%~dp0portable_runtime\python.exe"
+    set "PLAYWRIGHT_BROWSERS_PATH=%~dp0portable_runtime\playwright_browsers"
+    echo [PORTABLE] Using pre-bundled standalone Python runtime.
+    goto :LAUNCH
+)
+
+:: 2. Priority 2: Use local virtual environment (.venv)
 set "VENV_DIR=%~dp0.venv"
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
 
-:: 2. Test if existing .venv works on this machine (detects broken paths from copying between PCs)
 set "VENV_VALID=0"
 if exist "%PYTHON_EXE%" (
     "%PYTHON_EXE%" -c "import sys" >nul 2>&1
     if !ERRORLEVEL! EQU 0 (
         set "VENV_VALID=1"
     ) else (
-        echo [NOTICE] Found a virtual environment copied from another PC with mismatched paths.
+        echo [NOTICE] Detected virtual environment copied from another PC with different drive/user paths.
         echo [SETUP] Rebuilding clean local environment for this PC...
         rmdir /s /q "%VENV_DIR%" >nul 2>&1
     )
@@ -36,14 +43,24 @@ if exist "%PYTHON_EXE%" (
 :: 3. If no valid .venv exists, create one using system Python
 if "!VENV_VALID!"=="0" (
     echo [SETUP] Initializing local virtual environment...
-    python -m venv "%VENV_DIR%"
-    if !ERRORLEVEL! NEQ 0 (
-        echo [ERROR] System Python not found. Please install Python 3.10 or 3.11 from python.org
-        echo         and ensure "Add python.exe to PATH" is checked.
-        pause
-        exit /b 1
+    python -m venv "%VENV_DIR%" >nul 2>&1
+    if !ERRORLEVEL! EQU 0 (
+        set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
+    ) else (
+        echo [NOTICE] System Python is not installed on this PC.
+        echo [BOOTSTRAP] Building standalone portable runtime automatically...
+        call "%~dp0bundle_portable.bat"
+        if exist "%~dp0portable_runtime\python.exe" (
+            set "PYTHON_EXE=%~dp0portable_runtime\python.exe"
+            set "PLAYWRIGHT_BROWSERS_PATH=%~dp0portable_runtime\playwright_browsers"
+            goto :LAUNCH
+        ) else (
+            echo [ERROR] Could not set up Python environment.
+            echo Please install Python 3.10+ from python.org with "Add python.exe to PATH" checked.
+            pause
+            exit /b 1
+        )
     )
-    set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
 )
 
 echo Using Python: %PYTHON_EXE%
@@ -64,6 +81,7 @@ if !ERRORLEVEL! NEQ 0 (
     echo.
 )
 
+:LAUNCH
 :: 5. Launch the Web Dashboard bound strictly to 127.0.0.1
 echo Launching Web Dashboard in your browser...
 echo Local address: http://127.0.0.1:8501

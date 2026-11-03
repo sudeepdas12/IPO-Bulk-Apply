@@ -11,8 +11,10 @@ venv/
 # Build and Packaging
 build/
 dist/
+portable_runtime/
 *.egg-info/
 *.egg
+*.zip
 
 # Testing and Type checking
 .pytest_cache/

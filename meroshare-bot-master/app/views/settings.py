@@ -63,6 +63,65 @@ def render_settings_view() -> None:
                     st.toast("Vault successfully encrypted with DPAPI!", icon="🔒")
                     st.rerun()
 
+    # Vault & Audit History Backup / Export Container
+    import csv
+    import io
+    import json
+
+    from bot.history_manager import HistoryManager
+    hist_mgr = HistoryManager()
+    with st.container(border=True):
+        st.markdown("### Vault backup & data export")
+        st.caption("Export decrypted account credentials and application audit logs for migration to another PC or disaster recovery.")
+
+        bak_col1, bak_col2 = st.columns(2)
+        with bak_col1:
+            st.markdown("**Account Vault Backup (CSV)**")
+            st.caption("Exports decrypted credentials into standard CSV format for importing into another PC.")
+            all_accs = acc_mgr.load_accounts()
+            if all_accs:
+                csv_buf = io.StringIO()
+                writer = csv.writer(csv_buf)
+                writer.writerow(["Name", "Capital_ID", "Username", "Password", "Bank_Name", "Default_Kitta", "CRN", "TXN_PIN", "Branch", "Company"])
+                for a in all_accs:
+                    writer.writerow([
+                        a.get("name", ""),
+                        a.get("capital_id", ""),
+                        a.get("username", ""),
+                        a.get("password", ""),
+                        a.get("bank", ""),
+                        a.get("kitta", "10"),
+                        a.get("crn", ""),
+                        a.get("txn_pin", ""),
+                        a.get("branch", ""),
+                        a.get("company", ""),
+                    ])
+                st.download_button(
+                    label=f"Export Vault CSV ({len(all_accs)} Accounts)",
+                    data=csv_buf.getvalue(),
+                    file_name="demats_vault_backup.csv",
+                    mime="text/csv",
+                    icon=":material/download:",
+                    width="stretch",
+                )
+            else:
+                st.info("No accounts currently configured in vault.", icon=":material/info:")
+
+        with bak_col2:
+            st.markdown("**Application Audit History (JSON)**")
+            st.caption("Exports all previous IPO application execution records, allotments, and result logs.")
+            history_records = hist_mgr.get_history()
+            history_json_str = json.dumps(history_records, indent=2, ensure_ascii=False)
+            st.download_button(
+                label=f"Export History JSON ({len(history_records)} Runs)",
+                data=history_json_str,
+                file_name="ipo_history_backup.json",
+                mime="application/json",
+                icon=":material/history:",
+                width="stretch",
+                disabled=len(history_records) == 0,
+            )
+
     # Mobile Notifications Container
     with st.container(border=True):
         st.markdown("### Mobile notifications")

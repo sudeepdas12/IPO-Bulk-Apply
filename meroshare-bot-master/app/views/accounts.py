@@ -155,6 +155,15 @@ def render_accounts_registry(acc_mgr: AccountManager) -> None:
 
     accounts = acc_mgr.load_accounts()
 
+    vault_health = acc_mgr.check_vault_health()
+    if vault_health.get("cross_machine_locked"):
+        st.error(
+            f"⚠️ **DPAPI Machine-Lock Detected ({vault_health['failed_count']} accounts with locked credentials):**\n\n"
+            "These accounts were encrypted with Windows DPAPI on another computer. Windows DPAPI keys cannot be transferred across PCs. "
+            "Please click **Edit credentials** below or re-import your CSV on this PC to store their passwords for automated application.",
+            icon=":material/lock_reset:",
+        )
+
     # Action Toolbar
     act_col1, act_col2, act_col3, act_col4 = st.columns([1.5, 1.5, 1.5, 1.5], vertical_alignment="center")
     with act_col1:

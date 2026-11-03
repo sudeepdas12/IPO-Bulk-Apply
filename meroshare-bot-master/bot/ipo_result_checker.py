@@ -342,13 +342,16 @@ class IPOResultChecker:
         boid = account.get("boid") or f"{cap}{usr.zfill(8) if usr.isdigit() else usr}"
 
         if not (cap and usr and pwd):
+            fail_msg = "Missing account credentials for Meroshare login"
+            if not pwd:
+                fail_msg = "Password missing or encrypted on another PC (DPAPI machine-lock). Re-enter password or switch to CDSC Browser AI Solver."
             return {
                 "name": name,
                 "boid": boid,
                 "allotted": False,
                 "kitta": 0,
                 "status": "AUTH_FAILED",
-                "message": "Missing account credentials for Meroshare login",
+                "message": fail_msg,
             }
 
         ok, msg, token = api_client.login(cap, usr, pwd)

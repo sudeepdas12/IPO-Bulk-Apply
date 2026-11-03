@@ -72,6 +72,20 @@ def render_allotment_results(
     is_meroshare_mode = "Meroshare Direct" in query_mode
     is_browser_mode = "Browser AI" in query_mode
 
+    vault_health = acc_mgr.check_vault_health()
+    if is_meroshare_mode and vault_health.get("cross_machine_locked"):
+        col_warn, col_switch = st.columns([3, 1], vertical_alignment="center")
+        with col_warn:
+            st.warning(
+                f"**Vault Machine-Lock Detected ({vault_health['failed_count']} accounts):** "
+                "These credentials were encrypted with Windows DPAPI on another computer. Meroshare Direct Portal cannot log in without passwords.",
+                icon=":material/lock_reset:",
+            )
+        with col_switch:
+            if st.button("Switch to Browser AI (No Login)", icon=":material/smart_toy:", width="stretch", key="dpapi_switch_browser_solver"):
+                st.session_state.switch_to_browser = True
+                st.rerun()
+
     # 1. Company Selection
     if not st.session_state.get("result_companies"):
         with st.spinner("Loading allotment companies from CDSC..."):

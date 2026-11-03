@@ -24,7 +24,22 @@ def find_free_port() -> int:
 
 
 def find_browser_executable() -> Optional[str]:
-    """Locate Google Chrome or Microsoft Edge executable on Windows/Linux/macOS."""
+    """Locate Google Chrome, bundled Playwright Chromium, or Microsoft Edge."""
+    # Check bundled Playwright Chromium if configured
+    playwright_browsers = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if playwright_browsers:
+        pw_path = Path(playwright_browsers)
+        for chrome_cand in pw_path.glob("chromium-*/chrome-win64/chrome.exe"):
+            if chrome_cand.exists():
+                return str(chrome_cand)
+
+    # Check relative to python_portable if in portable mode
+    root_portable = Path(__file__).resolve().parent.parent.parent / "python_portable" / "playwright_browsers"
+    if root_portable.exists():
+        for chrome_cand in root_portable.glob("chromium-*/chrome-win64/chrome.exe"):
+            if chrome_cand.exists():
+                return str(chrome_cand)
+
     candidates = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",

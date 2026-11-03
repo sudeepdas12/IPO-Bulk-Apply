@@ -25,14 +25,47 @@ class AccountManager:
         if file_path is None:
             curr_dir = Path(__file__).resolve().parent
             candidates = [
-                curr_dir.parent / "demats.txt",
-                curr_dir / "demats.txt",
                 Path.cwd() / "demats.txt",
                 Path.cwd() / "meroshare-bot-master" / "demats.txt",
+                curr_dir.parent / "demats.txt",
+                curr_dir / "demats.txt",
             ]
             self.file_path = next((p for p in candidates if p.exists()), candidates[0])
         else:
             self.file_path = Path(file_path)
+
+    def check_vault_health(self) -> Dict[str, Any]:
+        """
+        Checks if the vault file has DPAPI-encrypted credentials that cannot be decrypted
+        on this machine (cross-machine machine-lock).
+        """
+        if not self.file_path.exists():
+            return {"healthy": True, "cross_machine_locked": False, "failed_count": 0, "total_accounts": 0}
+
+        try:
+            with self.file_path.open("r", encoding="utf-8-sig", newline="") as f:
+                reader = list(csv.reader(f))
+        except Exception:
+            return {"healthy": True, "cross_machine_locked": False, "failed_count": 0, "total_accounts": 0}
+
+        failed = 0
+        total_accounts = 0
+        for line_no, row in enumerate(reader, start=1):
+            if not row or len(row) < 4:
+                continue
+            if line_no == 1 and [x.strip().lower() for x in row] in EXPECTED_HEADERS:
+                continue
+            total_accounts += 1
+            raw_pwd = row[3].strip()
+            if raw_pwd.startswith("DPAPI:") and not decrypt_text(raw_pwd):
+                failed += 1
+
+        return {
+            "healthy": failed == 0,
+            "cross_machine_locked": failed > 0,
+            "failed_count": failed,
+            "total_accounts": total_accounts,
+        }
 
     def load_account_objects(self) -> List[Account]:
         """Loads accounts as domain Account objects."""

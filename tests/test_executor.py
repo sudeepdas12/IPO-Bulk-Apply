@@ -7,9 +7,9 @@ root_dir = Path(__file__).resolve().parent.parent / "meroshare-bot-master"
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 
+import pytest
 from bot.executor import IPOExecutor
 from bot.models import ResultState
-import pytest
 
 
 @pytest.fixture(autouse=True)

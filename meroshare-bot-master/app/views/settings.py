@@ -37,6 +37,32 @@ def render_settings_view() -> None:
                 help="Gentle delay between submitting different applicant accounts to avoid server throttling.",
             )
 
+    # Vault Security & Encryption At Rest
+    from bot.account_manager import AccountManager
+    acc_mgr = AccountManager()
+    with st.container(border=True):
+        st.markdown("### Credential vault security")
+        st.caption("Protect passwords, transaction PINs, and CRNs with Windows DPAPI encryption.")
+
+        is_enc = acc_mgr.is_vault_encrypted()
+        sec_col1, sec_col2 = st.columns([3, 2])
+        with sec_col1:
+            if is_enc:
+                st.success("🔒 **Vault Encryption Active:** Passwords and PINs in `demats.txt` are encrypted on disk with your Windows User Key (DPAPI).", icon=":material/lock:")
+            else:
+                st.warning("⚠️ **Plaintext Storage:** Credentials in `demats.txt` are currently stored in plaintext. Encrypt to protect against unauthorized disk inspection.", icon=":material/lock_open:")
+        with sec_col2:
+            if is_enc:
+                if st.button("Convert to Plaintext (Decrypt)", icon=":material/lock_open:", width="stretch"):
+                    acc_mgr.decrypt_vault()
+                    st.toast("Vault decrypted to plaintext.", icon="🔓")
+                    st.rerun()
+            else:
+                if st.button("Encrypt Vault (Windows DPAPI)", type="primary", icon=":material/lock:", width="stretch"):
+                    acc_mgr.encrypt_vault()
+                    st.toast("Vault successfully encrypted with DPAPI!", icon="🔒")
+                    st.rerun()
+
     # Mobile Notifications Container
     with st.container(border=True):
         st.markdown("### Mobile notifications")

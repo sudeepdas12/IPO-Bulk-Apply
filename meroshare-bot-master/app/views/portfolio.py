@@ -137,9 +137,12 @@ def _execute_portfolio_sync(accounts: List[Dict[str, Any]], api_client: Meroshar
     browser_page = None
     playwright_ctx = None
     try:
-        from bot.cdsc_browser_checker import find_browser_executable, find_free_port
+        import subprocess
+        import tempfile
+
         from playwright.sync_api import sync_playwright
-        import subprocess, tempfile
+
+        from bot.cdsc_browser_checker import find_browser_executable, find_free_port
 
         exe = find_browser_executable()
         if exe:

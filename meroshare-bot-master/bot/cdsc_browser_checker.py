@@ -54,7 +54,7 @@ class CDSCBrowserChecker:
     def _get_ocr(self) -> Any:
         if self._ocr is None:
             try:
-                import ddddocr
+                import ddddocr  # type: ignore[import-untyped]
                 self._ocr = ddddocr.DdddOcr(show_ad=False)
             except Exception as e:
                 logger.warning("Could not initialize ddddocr: %s", e)
@@ -176,7 +176,7 @@ class CDSCBrowserChecker:
                     checked = False
                     for _attempt in range(3):
                         captcha_img = page.wait_for_selector("img[src^='data:image/png']", timeout=5000)
-                        src = captcha_img.get_attribute("src") or ""
+                        src = captcha_img.get_attribute("src") or "" if captcha_img else ""
                         if "," in src and ocr:
                             b64 = src.split(",")[1]
                             code = ocr.classification(base64.b64decode(b64))

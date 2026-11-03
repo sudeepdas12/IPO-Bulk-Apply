@@ -135,6 +135,29 @@ def test_account_manager_preserves_masked_secrets():
         assert reloaded[0]["password"] == "TruePassword123"
         assert reloaded[0]["crn"] == "CRN123456"
         assert reloaded[0]["txn_pin"] == "9876"
+
+        # Test encrypt_vault and decrypt_vault
+        assert mgr.is_vault_encrypted() is False
+        ok_enc = mgr.encrypt_vault()
+        assert ok_enc is True
+        assert mgr.is_vault_encrypted() is True
+
+        # Ensure raw file content is encrypted
+        raw_text = tf_path.read_text(encoding="utf-8")
+        assert "TruePassword123" not in raw_text
+        assert "DPAPI:" in raw_text
+
+        # Ensure loaded credentials remain decrypted in memory
+        loaded_enc = mgr.load_accounts()
+        assert loaded_enc[0]["password"] == "TruePassword123"
+        assert loaded_enc[0]["crn"] == "CRN123456"
+        assert loaded_enc[0]["txn_pin"] == "9876"
+
+        # Decrypt vault back to plaintext
+        ok_dec = mgr.decrypt_vault()
+        assert ok_dec is True
+        assert mgr.is_vault_encrypted() is False
+        assert "TruePassword123" in tf_path.read_text(encoding="utf-8")
     finally:
         if tf_path.exists():
             tf_path.unlink()

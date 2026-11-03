@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from bot.models import Account
-from bot.security import is_masked_placeholder, secure_file_permissions
+from bot.security import decrypt_text, encrypt_text, is_masked_placeholder, secure_file_permissions
 
 EXPECTED_HEADERS = [
     ["name", "capitalid", "username", "password", "bank", "kitta", "crn", "txn_pin"],
@@ -62,11 +62,11 @@ class AccountManager:
             name = row[0].strip()
             capital_id = row[1].strip()
             username = row[2].strip()
-            password = row[3].strip()
+            password = decrypt_text(row[3].strip())
             bank = row[4].strip()
             kitta = row[5].strip()
-            crn = row[6].strip()
-            txn_pin = row[7].strip()
+            crn = decrypt_text(row[6].strip())
+            txn_pin = decrypt_text(row[7].strip())
             branch = row[8].strip() if len(row) >= 9 else ""
             company = row[9].strip() if len(row) >= 10 else ""
 
@@ -87,10 +87,36 @@ class AccountManager:
 
         return accounts
 
-    def save_accounts(self, accounts: List[Dict[str, Any]]) -> bool:
+    def is_vault_encrypted(self) -> bool:
+        """Checks if stored vault credentials contain encrypted (DPAPI) secrets."""
+        if not self.file_path.exists():
+            return False
+        try:
+            with self.file_path.open("r", encoding="utf-8-sig", newline="") as f:
+                content = f.read()
+                return "DPAPI:" in content
+        except Exception:
+            return False
+
+    def encrypt_vault(self) -> bool:
+        """Encrypts all account passwords, PINs, and CRNs at rest using Windows DPAPI."""
+        accs = self.load_accounts()
+        if not accs:
+            return True
+        return self.save_accounts(accs, encrypt_secrets=True)
+
+    def decrypt_vault(self) -> bool:
+        """Converts vault credentials back to plaintext."""
+        accs = self.load_accounts()
+        if not accs:
+            return True
+        return self.save_accounts(accs, encrypt_secrets=False)
+
+    def save_accounts(self, accounts: List[Dict[str, Any]], encrypt_secrets: Optional[bool] = None) -> bool:
         """
         Atomically save accounts list back to demats.txt.
         If any password or PIN contains a masked placeholder, preserves existing secret.
+        Supports encryption at rest via Windows DPAPI.
         """
         existing_lookup: Dict[str, Dict[str, Any]] = {}
         if self.file_path.exists():
@@ -100,6 +126,8 @@ class AccountManager:
 
         header = ["Name", "CapitalID", "Username", "Password", "Bank", "Kitta", "CRN", "TXN_PIN", "Branch", "Company"]
         rows = [header]
+
+        should_encrypt = self.is_vault_encrypted() if encrypt_secrets is None else encrypt_secrets
 
         for acc in accounts:
             cap_id = str(acc.get("capital_id", "")).strip()
@@ -119,15 +147,24 @@ class AccountManager:
             if is_masked_placeholder(crn_val) and old_data.get("crn"):
                 crn_val = str(old_data["crn"]).strip()
 
+            if should_encrypt:
+                pwd_to_save = encrypt_text(pwd) if not pwd.startswith("DPAPI:") else pwd
+                pin_to_save = encrypt_text(pin) if not pin.startswith("DPAPI:") else pin
+                crn_to_save = encrypt_text(crn_val) if not crn_val.startswith("DPAPI:") else crn_val
+            else:
+                pwd_to_save = pwd
+                pin_to_save = pin
+                crn_to_save = crn_val
+
             rows.append([
                 str(acc.get("name", "")).strip(),
                 cap_id,
                 uname,
-                pwd,
+                pwd_to_save,
                 str(acc.get("bank", "")).strip(),
                 str(acc.get("kitta", "10")).strip() or "10",
-                crn_val,
-                pin,
+                crn_to_save,
+                pin_to_save,
                 str(acc.get("branch", "")).strip(),
                 str(acc.get("company", "")).strip(),
             ])

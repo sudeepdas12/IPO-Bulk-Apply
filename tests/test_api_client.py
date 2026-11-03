@@ -69,7 +69,7 @@ def test_api_client_login_empty_capital_id():
     assert "empty or missing" in msg
     assert token is None
 
-    ok_ws, msg_ws, token_ws = client.login("   ", "12345678", "Password123")
+    ok_ws, msg_ws, _token_ws = client.login("   ", "12345678", "Password123")
     assert ok_ws is False
     assert "empty or missing" in msg_ws
 

@@ -26,6 +26,11 @@ if exist "%~dp0..\.venv\Scripts\python.exe" (
 )
 
 echo Using Python: %PYTHON_EXE%
+"%PYTHON_EXE%" -c "import streamlit" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [SETUP] Streamlit not found in selected environment. Installing requirements...
+    "%PYTHON_EXE%" -m pip install -r "%~dp0requirements.txt"
+)
 echo Launching Web Dashboard in your browser...
 echo.
 

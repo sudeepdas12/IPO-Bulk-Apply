@@ -2,7 +2,7 @@ import difflib
 import re
 import time
 
-import neotermcolor
+import neotermcolor  # type: ignore[import-untyped]
 
 from bot.models import SkippableIpoStateError
 

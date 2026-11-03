@@ -15,7 +15,6 @@ from bot.history_manager import HistoryManager
 from bot.models import ResultState
 from bot.notifications import send_run_summary
 
-
 IP_COOLDOWN_STATUS = "IP_COOLDOWN"
 DEFERRED_IP_COOLDOWN_STATUS = "DEFERRED_IP_COOLDOWN"
 

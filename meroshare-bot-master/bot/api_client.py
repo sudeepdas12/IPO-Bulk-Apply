@@ -31,6 +31,7 @@ class MeroshareAPIClient:
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
         self._capitals_cache: Optional[List[Dict[str, Any]]] = None
+        self.session: Any = None
         self._init_session()
 
     def _init_session(self) -> None:
@@ -61,7 +62,7 @@ class MeroshareAPIClient:
                 elif method.upper() == "POST":
                     return self.session.post(url, json=json_payload, headers=headers, timeout=self.timeout)
                 else:
-                    return self.session.request(method, url, json=json_payload, headers=headers, timeout=self.timeout)
+                    return self.session.request(method.upper(), url, json=json_payload, headers=headers, timeout=self.timeout)  # type: ignore[arg-type,return-value]
             except Exception as exc:
                 last_error = exc
                 wait_time = self.retry_backoff * (2 ** (attempt - 1))
@@ -312,9 +313,12 @@ class MeroshareAPIClient:
 
         # Standalone path: spin up headless Chrome session
         try:
-            from bot.cdsc_browser_checker import find_browser_executable, find_free_port
+            import subprocess
+            import tempfile
+
             from playwright.sync_api import sync_playwright
-            import subprocess, tempfile
+
+            from bot.cdsc_browser_checker import find_browser_executable, find_free_port
 
             exe = find_browser_executable()
             if not exe:

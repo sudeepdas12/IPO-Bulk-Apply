@@ -58,7 +58,7 @@ class IPOExecutor:
             for acc in accounts:
                 name = str(acc.get("name", "Account")).strip()
                 acc_kitta = int(acc.get("kitta", kitta)) if str(acc.get("kitta", "")).isdigit() else kitta
-                detail = {
+                cooldown_detail: Dict[str, Any] = {
                     "account": name,
                     "name": name,
                     "username": acc.get("username", ""),
@@ -68,8 +68,8 @@ class IPOExecutor:
                     "message": f"Execution blocked: CDSC IP cooldown active ({rem_str}). Reason: {reason}",
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
-                details_list.append(detail)
-                skipped_list.append(detail)
+                details_list.append(cooldown_detail)
+                skipped_list.append(cooldown_detail)
             return {
                 "total": total,
                 "applied": [],

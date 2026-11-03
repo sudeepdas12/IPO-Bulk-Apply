@@ -30,6 +30,8 @@ demats_tmp_*.txt
 history_tmp_*.json
 *.env
 .env
+.user_data_backup/
+*.bak
 data/cdsc_cooldown.json
 data/history.json
 data/cached_allotment_companies.json

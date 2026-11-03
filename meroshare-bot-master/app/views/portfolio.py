@@ -237,13 +237,21 @@ def _execute_portfolio_sync(accounts: List[Dict[str, Any]], api_client: Meroshar
 
             # Query portfolio with authentic browser fallback if CDSC WAF blocks direct REST endpoint
             account_creds = {"capital_id": cap_id, "username": user, "password": pwd}
-            port_res = api_client.get_portfolio(
-                token,
-                demat=demat,
-                client_code=client_code,
-                account_creds=account_creds,
-                browser_page=browser_page,
-            )
+            try:
+                port_res = api_client.get_portfolio(
+                    token,
+                    demat=demat,
+                    client_code=client_code,
+                    account_creds=account_creds,
+                    browser_page=browser_page,
+                )
+            except TypeError:
+                port_res = api_client.get_portfolio(
+                    token,
+                    demat=demat,
+                    client_code=client_code,
+                    account_creds=account_creds,
+                )
             if not port_res:
                 fail_count += 1
                 account_breakdown.append({

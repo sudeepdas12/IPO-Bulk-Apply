@@ -381,6 +381,7 @@ class MeroshareAPIClient:
         client_code: str = "",
         account_creds: Optional[Dict[str, str]] = None,
         browser_page: Any = None,
+        **kwargs: Any,
     ) -> Optional[Dict[str, Any]]:
         """
         Fetch user's stock holdings and portfolio valuation from Meroshare.

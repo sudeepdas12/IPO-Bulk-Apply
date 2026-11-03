@@ -122,6 +122,21 @@ def render_settings_view() -> None:
                 disabled=len(history_records) == 0,
             )
 
+    # Factory Reset / Clean Distribution Container
+    with st.container(border=True):
+        st.markdown("### Prepare clean distribution (Factory reset)")
+        st.caption("Wipe all saved accounts and audit history to prepare a clean, plug-and-play package for another PC or user.")
+
+        confirm_wipe = st.checkbox(
+            "I have exported my accounts and want to erase all stored credentials from this folder for clean distribution.",
+            key="confirm_clean_wipe",
+        )
+        if st.button("Wipe All Stored Accounts & History", type="secondary", icon=":material/delete_forever:", disabled=not confirm_wipe, width="stretch"):
+            acc_mgr.save_accounts([], encrypt_secrets=False)
+            hist_mgr.clear()
+            st.success("All accounts and audit histories wiped! The folder is now completely clean and ready for distribution.", icon=":material/check_circle:")
+            st.rerun()
+
     # Mobile Notifications Container
     with st.container(border=True):
         st.markdown("### Mobile notifications")

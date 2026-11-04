@@ -13,27 +13,28 @@ from bot.account_manager import AccountManager
 from bot.security import mask_secret, redact_accounts_list
 
 
-@st.dialog("Add new Demat account")
+@st.dialog("Add new Demat account", width="large")
 def add_account_dialog(acc_mgr: AccountManager) -> None:
     """Secure modal dialog to add a new account without exposing secrets."""
     st.caption("Enter the Meroshare credentials for the new applicant.")
 
-    with st.form("form_add_account"):
+    with st.form("form_add_account", clear_on_submit=False):
         col1, col2 = st.columns(2)
         with col1:
             name = st.text_input("Applicant full name*", placeholder="e.g. Ram Bahadur Thapa")
-            cap_id = st.text_input("Capital ID / DP code*", placeholder="e.g. 13016500")
             username = st.text_input("Meroshare username / Demat*", placeholder="e.g. 00123456")
-            password = st.text_input("Password*", type="password")
             bank = st.text_input("Bank name*", placeholder="e.g. Nabil Bank Limited")
+            crn = st.text_input("CRN number*", type="password", placeholder="e.g. 00867066")
+            kitta = st.number_input("Default kitta*", min_value=10, max_value=1000, value=10, step=10)
 
         with col2:
-            kitta = st.number_input("Default kitta*", min_value=10, max_value=1000, value=10, step=10)
-            crn = st.text_input("CRN number*", type="password", placeholder="e.g. 00867066")
-            txn_pin = st.text_input("4-digit transaction PIN*", type="password", max_chars=4, placeholder="e.g. 1234")
+            cap_id = st.text_input("Capital ID / DP code*", placeholder="e.g. 13016500")
+            password = st.text_input("Password*", type="password")
             branch = st.text_input("Branch name", placeholder="e.g. Kathmandu Main")
+            txn_pin = st.text_input("4-digit transaction PIN*", type="password", max_chars=4, placeholder="e.g. 1234")
             company = st.text_input("Preferred target company (optional)", placeholder="e.g. Upper Tamakoshi")
 
+        st.write("")
         submit = st.form_submit_button("Save account", icon=":material/save:", width="stretch")
 
         if submit:
@@ -57,7 +58,7 @@ def add_account_dialog(acc_mgr: AccountManager) -> None:
                 st.error(f"Validation error: {msg}", icon=":material/error:")
 
 
-@st.dialog("Edit account credentials")
+@st.dialog("Edit account credentials", width="large")
 def edit_credentials_dialog(acc_mgr: AccountManager, accounts: List[Dict[str, Any]]) -> None:
     """Secure modal dialog to update credentials without exposing existing passwords."""
     if not accounts:
@@ -75,12 +76,12 @@ def edit_credentials_dialog(acc_mgr: AccountManager, accounts: List[Dict[str, An
         icon=":material/lock:",
     )
 
-    with st.form("form_edit_account"):
+    with st.form("form_edit_account", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
             new_name = st.text_input("Applicant name", value=curr_acc.get("name", ""))
             new_bank = st.text_input("Bank name", value=curr_acc.get("bank", ""))
-            new_branch = st.text_input("Branch name", value=curr_acc.get("branch", ""))
+            new_crn = st.text_input("New CRN (leave blank to keep current)", type="password")
             new_kitta = st.number_input(
                 "Default kitta",
                 min_value=10,
@@ -91,10 +92,11 @@ def edit_credentials_dialog(acc_mgr: AccountManager, accounts: List[Dict[str, An
 
         with c2:
             new_password = st.text_input("New password (leave blank to keep current)", type="password")
+            new_branch = st.text_input("Branch name", value=curr_acc.get("branch", ""))
             new_pin = st.text_input("New transaction PIN (leave blank to keep current)", type="password", max_chars=4)
-            new_crn = st.text_input("New CRN (leave blank to keep current)", type="password")
             new_company = st.text_input("Target company override", value=curr_acc.get("company", ""))
 
+        st.write("")
         submit = st.form_submit_button("Update account", icon=":material/check:", width="stretch")
 
         if submit:

@@ -153,6 +153,55 @@ section[data-testid="stSidebar"] a:hover {
 ::-webkit-scrollbar-thumb:hover {
     background: #94A3B8;
 }
+
+/* Eliminate Streamlit's overlapping "Press Enter to submit form" helper text inside inputs */
+div[data-testid="InputInstructions"],
+div[data-testid="InputInstructions"] * {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* Modal Dialog Backdrop & Elevation Protection */
+div[data-testid="stModal"] {
+    background-color: rgba(15, 23, 42, 0.65) !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+}
+
+div[data-testid="stModal"] > div[role="dialog"],
+div[data-testid="stDialog"] > div[role="dialog"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
+    border-radius: 14px !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+    padding: 1.5rem !important;
+}
+
+/* Input Fields Solid Clean Surface */
+div[data-baseweb="input"],
+div[data-baseweb="base-input"] {
+    background-color: #FFFFFF !important;
+    border-radius: 8px !important;
+}
+
+div[data-baseweb="input"] input,
+div[data-baseweb="base-input"] input {
+    color: #0F172A !important;
+    background-color: transparent !important;
+    font-size: 14px !important;
+}
+
+/* Form Container in Dialogs */
+div[data-testid="stForm"] {
+    border: none !important;
+    padding: 0 !important;
+    background: transparent !important;
+}
 </style>
 """)
 

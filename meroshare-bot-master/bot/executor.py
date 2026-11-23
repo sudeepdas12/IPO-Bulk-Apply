@@ -291,6 +291,13 @@ class IPOExecutor:
                     selected_bank = b
                     break
 
+            if not selected_bank:
+                avail_banks = ", ".join(b.get("bankName", "Unknown") for b in banks)
+                return ResultState.FAILED.value, (
+                    f"Configured bank '{target_bank}' not found in user's linked banks. "
+                    f"Linked banks: [{avail_banks}]."
+                )
+
         if not selected_bank:
             selected_bank = banks[0]
 

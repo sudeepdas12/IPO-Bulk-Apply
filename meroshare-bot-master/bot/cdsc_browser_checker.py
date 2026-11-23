@@ -6,6 +6,7 @@ import base64
 import logging
 import os
 import re
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -141,11 +142,20 @@ class CDSCBrowserChecker:
                 page.click("#companyShare")
                 time.sleep(0.4)
 
-                # Search company in ng-select
+                # Search and select company in ng-select input with typing support
                 clean_target = re.sub(r"[^\w\s]", "", company_name.lower())
                 found_option = False
 
-                # Read all options
+                # Type company name into ng-select search input if present
+                search_input = page.locator("#companyShare input[type='text'], .ng-select-container input[type='text']")
+                if search_input.count() > 0:
+                    try:
+                        search_input.first.fill(company_name[:15])
+                        time.sleep(0.4)
+                    except Exception:
+                        pass
+
+                # Read all filtered options
                 options = page.locator(".ng-dropdown-panel .ng-option").all()
                 for opt in options:
                     opt_text = opt.inner_text().strip()
@@ -155,8 +165,19 @@ class CDSCBrowserChecker:
                         found_option = True
                         break
 
+                if not found_option:
+                    # Fallback: check all options or pick first only if matching keyword exists
+                    for opt in options:
+                        opt_text = opt.inner_text().strip()
+                        # Match word-by-word
+                        words = [w for w in clean_target.split() if len(w) > 3]
+                        if words and any(w in opt_text.lower() for w in words):
+                            opt.click()
+                            found_option = True
+                            break
+
                 if not found_option and options:
-                    # Select first option if exact match not found
+                    # If still not found, select first option
                     options[0].click()
 
                 time.sleep(0.3)
@@ -277,5 +298,6 @@ class CDSCBrowserChecker:
                 proc.kill()
             except Exception:
                 pass
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
         return results

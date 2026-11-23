@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
+import secrets
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
 
 
 def mask_secret(value: str, visible_suffix: int = 0, mask_char: str = "•") -> str:
@@ -137,10 +145,58 @@ def _unprotect_data_windows(cipher_bytes: bytes) -> Optional[bytes]:
     return None
 
 
-def encrypt_text(text: str) -> str:
-    """Encrypts text using Windows DPAPI with base64 encoding."""
+def derive_key(passphrase: str, salt: bytes, iterations: int = 600000) -> bytes:
+    """Derives a 256-bit cryptographic key from a passphrase using PBKDF2-HMAC-SHA256."""
+    return hashlib.pbkdf2_hmac("sha256", passphrase.encode("utf-8"), salt, iterations, dklen=32)
+
+
+def encrypt_aes_gcm(text: str, passphrase: str) -> str:
+    """Encrypts text using PBKDF2-HMAC-SHA256 key derivation and AES-256-GCM authenticated cipher."""
     if not text:
         return ""
+    if not HAS_CRYPTOGRAPHY:
+        raise RuntimeError("cryptography package is required for AES-256-GCM encryption")
+    salt = secrets.token_bytes(16)
+    nonce = secrets.token_bytes(12)
+    key = derive_key(passphrase, salt)
+    aesgcm = AESGCM(key)
+    ciphertext = aesgcm.encrypt(nonce, text.encode("utf-8"), None)
+    # Format: GCM:<salt(16)>:<nonce(12)>:<ciphertext+tag> in base64
+    combined = salt + nonce + ciphertext
+    return "GCM:" + base64.b64encode(combined).decode("ascii")
+
+
+def decrypt_aes_gcm(payload: str, passphrase: str) -> Optional[str]:
+    """Decrypts text previously encrypted by encrypt_aes_gcm using the provided passphrase."""
+    if not payload or not payload.startswith("GCM:"):
+        return None
+    if not HAS_CRYPTOGRAPHY:
+        raise RuntimeError("cryptography package is required for AES-256-GCM decryption")
+    try:
+        raw = base64.b64decode(payload[4:].encode("ascii"))
+        if len(raw) < 16 + 12 + 16:  # salt + nonce + min tag
+            return None
+        salt = raw[:16]
+        nonce = raw[16:28]
+        ciphertext = raw[28:]
+        key = derive_key(passphrase, salt)
+        aesgcm = AESGCM(key)
+        plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+        return plaintext.decode("utf-8")
+    except Exception:
+        return None
+
+
+def encrypt_text(text: str, master_passphrase: Optional[str] = None) -> str:
+    """
+    Encrypts text using AES-256-GCM (if master passphrase provided)
+    or Windows DPAPI with base64 encoding.
+    """
+    if not text:
+        return ""
+    if master_passphrase:
+        return encrypt_aes_gcm(text, master_passphrase)
+
     raw = text.encode("utf-8")
     protected = _protect_data_windows(raw)
     if protected is not None:
@@ -149,15 +205,27 @@ def encrypt_text(text: str) -> str:
     return "RAW:" + text
 
 
-def decrypt_text(payload: str) -> str:
-    """Decrypts text previously encrypted by encrypt_text."""
+def decrypt_text(payload: str, master_passphrase: Optional[str] = None) -> str:
+    """
+    Decrypts text previously encrypted by encrypt_text.
+    Supports GCM:, DPAPI:, and RAW: prefixes.
+    """
     if not payload:
         return ""
+    if payload.startswith("GCM:"):
+        if master_passphrase:
+            decrypted = decrypt_aes_gcm(payload, master_passphrase)
+            if decrypted is not None:
+                return decrypted
+        return ""
     if payload.startswith("DPAPI:"):
-        cipher_bytes = base64.b64decode(payload[6:].encode("ascii"))
-        plain = _unprotect_data_windows(cipher_bytes)
-        if plain is not None:
-            return plain.decode("utf-8")
+        try:
+            cipher_bytes = base64.b64decode(payload[6:].encode("ascii"))
+            plain = _unprotect_data_windows(cipher_bytes)
+            if plain is not None:
+                return plain.decode("utf-8")
+        except Exception:
+            pass
         return ""
     if payload.startswith("RAW:"):
         return payload[4:]

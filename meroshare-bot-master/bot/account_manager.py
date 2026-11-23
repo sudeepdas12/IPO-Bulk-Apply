@@ -11,6 +11,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from bot.models import Account
 from bot.security import decrypt_text, encrypt_text, is_masked_placeholder, secure_file_permissions
 
+try:
+    from filelock import FileLock
+    HAS_FILELOCK = True
+except ImportError:
+    HAS_FILELOCK = False
+
 EXPECTED_HEADERS = [
     ["name", "capitalid", "username", "password", "bank", "kitta", "crn", "txn_pin"],
     ["name", "capitalid", "username", "password", "bank", "kitta", "crn", "txn_pin", "branch"],
@@ -21,7 +27,7 @@ EXPECTED_HEADERS = [
 class AccountManager:
     """Manages Meroshare accounts, validation, persistence, and safe sync."""
 
-    def __init__(self, file_path: Optional[Path] = None):
+    def __init__(self, file_path: Optional[Path] = None, master_passphrase: Optional[str] = None):
         if file_path is None:
             curr_dir = Path(__file__).resolve().parent
             candidates = [
@@ -33,11 +39,12 @@ class AccountManager:
             self.file_path = next((p for p in candidates if p.exists()), candidates[0])
         else:
             self.file_path = Path(file_path)
+        self.master_passphrase = master_passphrase
 
     def check_vault_health(self) -> Dict[str, Any]:
         """
-        Checks if the vault file has DPAPI-encrypted credentials that cannot be decrypted
-        on this machine (cross-machine machine-lock).
+        Checks if the vault file has encrypted credentials that cannot be decrypted
+        on this machine (cross-machine machine-lock or missing passphrase).
         """
         if not self.file_path.exists():
             return {"healthy": True, "cross_machine_locked": False, "failed_count": 0, "total_accounts": 0}
@@ -57,7 +64,7 @@ class AccountManager:
                 continue
             total_accounts += 1
             raw_pwd = row[3].strip()
-            if raw_pwd.startswith("DPAPI:") and not decrypt_text(raw_pwd):
+            if (raw_pwd.startswith("DPAPI:") or raw_pwd.startswith("GCM:")) and not decrypt_text(raw_pwd, self.master_passphrase):
                 failed += 1
 
         return {
@@ -95,11 +102,11 @@ class AccountManager:
             name = row[0].strip()
             capital_id = row[1].strip()
             username = row[2].strip()
-            password = decrypt_text(row[3].strip())
+            password = decrypt_text(row[3].strip(), self.master_passphrase)
             bank = row[4].strip()
             kitta = row[5].strip()
-            crn = decrypt_text(row[6].strip())
-            txn_pin = decrypt_text(row[7].strip())
+            crn = decrypt_text(row[6].strip(), self.master_passphrase)
+            txn_pin = decrypt_text(row[7].strip(), self.master_passphrase)
             branch = row[8].strip() if len(row) >= 9 else ""
             company = row[9].strip() if len(row) >= 10 else ""
 
@@ -121,25 +128,29 @@ class AccountManager:
         return accounts
 
     def is_vault_encrypted(self) -> bool:
-        """Checks if stored vault credentials contain encrypted (DPAPI) secrets."""
+        """Checks if stored vault credentials contain encrypted (DPAPI or AES-GCM) secrets."""
         if not self.file_path.exists():
             return False
         try:
             with self.file_path.open("r", encoding="utf-8-sig", newline="") as f:
                 content = f.read()
-                return "DPAPI:" in content
+                return "DPAPI:" in content or "GCM:" in content
         except Exception:
             return False
 
-    def encrypt_vault(self) -> bool:
-        """Encrypts all account passwords, PINs, and CRNs at rest using Windows DPAPI."""
+    def encrypt_vault(self, master_passphrase: Optional[str] = None) -> bool:
+        """Encrypts all account passwords, PINs, and CRNs at rest using AES-GCM or Windows DPAPI."""
+        if master_passphrase:
+            self.master_passphrase = master_passphrase
         accs = self.load_accounts()
         if not accs:
             return True
         return self.save_accounts(accs, encrypt_secrets=True)
 
-    def decrypt_vault(self) -> bool:
+    def decrypt_vault(self, master_passphrase: Optional[str] = None) -> bool:
         """Converts vault credentials back to plaintext."""
+        if master_passphrase:
+            self.master_passphrase = master_passphrase
         accs = self.load_accounts()
         if not accs:
             return True
@@ -149,8 +160,17 @@ class AccountManager:
         """
         Atomically save accounts list back to demats.txt.
         If any password or PIN contains a masked placeholder, preserves existing secret.
-        Supports encryption at rest via Windows DPAPI.
+        Supports encryption at rest via AES-GCM or Windows DPAPI.
+        Prevents credential erasure by blocking save if vault has unreadable cross-machine secrets.
         """
+        # Safety Lock Guard: If file exists and contains unreadable DPAPI/GCM secrets, refuse overwrite
+        health = self.check_vault_health()
+        if health.get("cross_machine_locked") and health.get("failed_count", 0) > 0:
+            raise PermissionError(
+                f"Vault is locked: {health.get('failed_count')} accounts cannot be decrypted on this machine. "
+                "Writing now would permanently erase credentials. Provide the master passphrase or restore DPAPI access."
+            )
+
         existing_lookup: Dict[str, Dict[str, Any]] = {}
         if self.file_path.exists():
             for old in self.load_accounts():
@@ -181,9 +201,14 @@ class AccountManager:
                 crn_val = str(old_data["crn"]).strip()
 
             if should_encrypt:
-                pwd_to_save = encrypt_text(pwd) if not pwd.startswith("DPAPI:") else pwd
-                pin_to_save = encrypt_text(pin) if not pin.startswith("DPAPI:") else pin
-                crn_to_save = encrypt_text(crn_val) if not crn_val.startswith("DPAPI:") else crn_val
+                is_already_enc = pwd.startswith("DPAPI:") or pwd.startswith("GCM:")
+                pwd_to_save = encrypt_text(pwd, self.master_passphrase) if not is_already_enc else pwd
+
+                is_pin_enc = pin.startswith("DPAPI:") or pin.startswith("GCM:")
+                pin_to_save = encrypt_text(pin, self.master_passphrase) if not is_pin_enc else pin
+
+                is_crn_enc = crn_val.startswith("DPAPI:") or crn_val.startswith("GCM:")
+                crn_to_save = encrypt_text(crn_val, self.master_passphrase) if not is_crn_enc else crn_val
             else:
                 pwd_to_save = pwd
                 pin_to_save = pin
@@ -202,33 +227,42 @@ class AccountManager:
                 str(acc.get("company", "")).strip(),
             ])
 
-        # Atomic write to temporary file in same directory, then rename
+        # Atomic write with cross-process lock to temporary file in same directory, then rename
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_fd, temp_path_str = tempfile.mkstemp(
-            dir=str(self.file_path.parent),
-            prefix="demats_tmp_",
-            suffix=".txt",
-            text=True,
-        )
-        temp_path = Path(temp_path_str)
-        try:
-            with os.fdopen(temp_fd, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerows(rows)
-                f.flush()
-                os.fsync(f.fileno())
+        lock_path = self.file_path.parent / "demats.lock"
+        lock = FileLock(str(lock_path), timeout=10) if HAS_FILELOCK else None
 
-            secure_file_permissions(temp_path)
-            temp_path.replace(self.file_path)
-            secure_file_permissions(self.file_path)
-            return True
-        except Exception:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except Exception:
-                    pass
-            raise
+        def _do_write() -> bool:
+            temp_fd, temp_path_str = tempfile.mkstemp(
+                dir=str(self.file_path.parent),
+                prefix="demats_tmp_",
+                suffix=".txt",
+                text=True,
+            )
+            temp_path = Path(temp_path_str)
+            try:
+                with os.fdopen(temp_fd, "w", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerows(rows)
+                    f.flush()
+                    os.fsync(f.fileno())
+
+                secure_file_permissions(temp_path)
+                temp_path.replace(self.file_path)
+                secure_file_permissions(self.file_path)
+                return True
+            except Exception:
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except Exception:
+                        pass
+                raise
+
+        if lock:
+            with lock:
+                return _do_write()
+        return _do_write()
 
     @staticmethod
     def validate_account(acc: Dict[str, Any]) -> Tuple[bool, List[str]]:

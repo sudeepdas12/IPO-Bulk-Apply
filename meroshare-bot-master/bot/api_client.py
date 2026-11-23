@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import datetime
 import logging
+import random
 import re
+import shutil
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -52,25 +55,42 @@ class MeroshareAPIClient:
         url: str,
         headers: Optional[Dict[str, str]] = None,
         json_payload: Optional[Dict[str, Any]] = None,
+        timeout: Optional[int] = None,
     ) -> requests.Response:
-        """Executes HTTP request with exponential backoff on transient network faults."""
+        """Executes HTTP request with jittered exponential backoff on transient network faults and 429/5xx status codes."""
         last_error: Optional[Exception] = None
+        req_timeout = timeout or self.timeout
+        retry_status_codes = {429, 500, 502, 503, 504}
+
         for attempt in range(1, self.max_retries + 1):
             try:
                 if method.upper() == "GET":
-                    return self.session.get(url, headers=headers, timeout=self.timeout)
+                    resp = self.session.get(url, headers=headers, timeout=req_timeout)
                 elif method.upper() == "POST":
-                    return self.session.post(url, json=json_payload, headers=headers, timeout=self.timeout)
+                    resp = self.session.post(url, json=json_payload, headers=headers, timeout=req_timeout)
                 else:
-                    return self.session.request(method.upper(), url, json=json_payload, headers=headers, timeout=self.timeout)  # type: ignore[arg-type,return-value]
+                    resp = self.session.request(method.upper(), url, json=json_payload, headers=headers, timeout=req_timeout)
+
+                # Check for retryable server status codes
+                if resp.status_code in retry_status_codes and attempt < self.max_retries:
+                    wait_time = random.uniform(0.6, 1.2) * (self.retry_backoff * (2 ** (attempt - 1)))
+                    logger.warning(
+                        "Server status %d on %s %s (attempt %d/%d). Retrying with jitter in %.2fs...",
+                        resp.status_code, method, url, attempt, self.max_retries, wait_time,
+                    )
+                    time.sleep(wait_time)
+                    continue
+
+                return resp  # type: ignore[no-any-return]
             except Exception as exc:
                 last_error = exc
-                wait_time = self.retry_backoff * (2 ** (attempt - 1))
-                logger.warning(
-                    "Network error on %s %s (attempt %d/%d): %s. Retrying in %.1fs...",
-                    method, url, attempt, self.max_retries, exc, wait_time,
-                )
-                time.sleep(wait_time)
+                if attempt < self.max_retries:
+                    wait_time = random.uniform(0.6, 1.2) * (self.retry_backoff * (2 ** (attempt - 1)))
+                    logger.warning(
+                        "Network error on %s %s (attempt %d/%d): %s. Retrying in %.2fs...",
+                        method, url, attempt, self.max_retries, exc, wait_time,
+                    )
+                    time.sleep(wait_time)
 
         raise MeroshareNetworkError(f"Request failed after {self.max_retries} attempts: {last_error}")
 
@@ -227,7 +247,7 @@ class MeroshareAPIClient:
         }
 
         try:
-            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload)
+            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload, timeout=45)
             if resp.status_code == 200:
                 body_str = resp.text.strip()
                 if "rejected" not in body_str.lower() and (body_str.startswith("{") or body_str.startswith("[")):
@@ -313,9 +333,10 @@ class MeroshareAPIClient:
                 logger.warning("Fast-path browser portfolio query failed: %s", exc)
 
         # Standalone path: spin up headless Chrome session
+        tmp_dir = tempfile.mkdtemp(prefix="ms_port_")
+        proc = None
         try:
             import subprocess
-            import tempfile
 
             from playwright.sync_api import sync_playwright
 
@@ -327,56 +348,59 @@ class MeroshareAPIClient:
                 return None
 
             port = find_free_port()
-            tmp_dir = tempfile.mkdtemp(prefix="ms_port_")
             proc = subprocess.Popen(
                 [exe, f"--remote-debugging-port={port}", f"--user-data-dir={tmp_dir}", "--headless=new", "about:blank"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             time.sleep(1.0)
-            try:
-                with sync_playwright() as p:
-                    browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
-                    bpage = browser.contexts[0].new_page()
-                    bpage.goto("https://meroshare.cdsc.com.np/", timeout=20000)
+            with sync_playwright() as p:
+                browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+                bpage = browser.contexts[0].new_page()
+                bpage.goto("https://meroshare.cdsc.com.np/", timeout=20000)
 
-                    # If token already exists, perform direct token fetch
-                    if token and demat:
-                        data = bpage.evaluate(fetch_js, [token, demat, client_code])
-                    elif capital_id and username and password:
-                        # Fallback to UI form login if no token provided
-                        from bot.func import login
-                        dp = capital_id[3:] if capital_id.startswith("130") else capital_id
-                        bpage.goto("https://meroshare.cdsc.com.np/#/login", timeout=20000)
-                        login(bpage, dp, username, password)
-                        time.sleep(1.5)
-                        login_js = """async () => {
-                            let tok = sessionStorage.getItem('Authorization') || localStorage.getItem('Authorization');
-                            if (!tok) return {"error": "Token not found in browser storage after login"};
-                            let uRes = await fetch('https://webbackend.cdsc.com.np/api/meroShare/ownDetail/', {headers: {'Authorization': tok}});
-                            if (!uRes.ok) return {"error": `ownDetail returned status ${uRes.status}`};
-                            let user = await uRes.json();
-                            let pRes = await fetch('https://webbackend.cdsc.com.np/api/meroShareView/myPortfolio/', {
-                                method: 'POST',
-                                headers: {'Authorization': tok, 'Content-Type': 'application/json'},
-                                body: JSON.stringify({sortBy: 'script', demat: [user.demat], clientCode: user.clientCode, page: 1, size: 500, sortAsc: true})
-                            });
-                            if (!pRes.ok) return {"error": `myPortfolio returned status ${pRes.status}`};
-                            return await pRes.json();
-                        }"""
-                        data = bpage.evaluate(login_js)
-                    else:
-                        data = None
+                # If token already exists, perform direct token fetch
+                if token and demat:
+                    data = bpage.evaluate(fetch_js, [token, demat, client_code])
+                elif capital_id and username and password:
+                    # Fallback to UI form login if no token provided
+                    from bot.func import login
+                    dp = capital_id[3:] if capital_id.startswith("130") else capital_id
+                    bpage.goto("https://meroshare.cdsc.com.np/#/login", timeout=20000)
+                    login(bpage, dp, username, password)
+                    time.sleep(1.5)
+                    login_js = """async () => {
+                        let tok = sessionStorage.getItem('Authorization') || localStorage.getItem('Authorization');
+                        if (!tok) return {"error": "Token not found in browser storage after login"};
+                        let uRes = await fetch('https://webbackend.cdsc.com.np/api/meroShare/ownDetail/', {headers: {'Authorization': tok}});
+                        if (!uRes.ok) return {"error": `ownDetail returned status ${uRes.status}`};
+                        let user = await uRes.json();
+                        let pRes = await fetch('https://webbackend.cdsc.com.np/api/meroShareView/myPortfolio/', {
+                            method: 'POST',
+                            headers: {'Authorization': tok, 'Content-Type': 'application/json'},
+                            body: JSON.stringify({sortBy: 'script', demat: [user.demat], clientCode: user.clientCode, page: 1, size: 500, sortAsc: true})
+                        });
+                        if (!pRes.ok) return {"error": `myPortfolio returned status ${pRes.status}`};
+                        return await pRes.json();
+                    }"""
+                    data = bpage.evaluate(login_js)
+                else:
+                    data = None
 
-                    browser.close()
-                    if isinstance(data, dict) and ("meroShareMyPortfolio" in data or "meroSharePortfolio" in data):
-                        return data
-                    elif isinstance(data, dict) and "error" in data:
-                        logger.warning("Browser portfolio JS error: %s", data["error"])
-            finally:
-                proc.kill()
+                browser.close()
+                if isinstance(data, dict) and ("meroShareMyPortfolio" in data or "meroSharePortfolio" in data):
+                    return data
+                elif isinstance(data, dict) and "error" in data:
+                    logger.warning("Browser portfolio JS error: %s", data["error"])
         except Exception as exc:
             logger.error("Browser-assisted portfolio fetch failed: %s", exc)
+        finally:
+            if proc:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            shutil.rmtree(tmp_dir, ignore_errors=True)
         return None
 
     def get_portfolio(
@@ -404,7 +428,7 @@ class MeroshareAPIClient:
             "sortAsc": True,
         }
         try:
-            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload)
+            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload, timeout=45)
             if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, dict):
@@ -456,7 +480,7 @@ class MeroshareAPIClient:
         headers = {"Authorization": token}
         payload: Dict[str, Any] = {"page": 1, "size": 50, "filterDate": "", "searchWord": ""}
         try:
-            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload)
+            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload, timeout=45)
             if resp.status_code == 200:
                 data = resp.json()
                 items = data.get("object", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
@@ -506,7 +530,7 @@ class MeroshareAPIClient:
         }
 
         try:
-            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload)
+            resp = self._request_with_retry("POST", url, headers=headers, json_payload=payload, timeout=45)
 
             # Response handling
             if resp.status_code in (200, 201):

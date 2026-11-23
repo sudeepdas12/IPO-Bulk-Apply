@@ -38,6 +38,24 @@ def render_apply_workflow(
                 st.rerun()
         return
 
+    # Check for interrupted batch from previous crashed/closed run
+    interrupted = history_mgr.get_interrupted_checkpoint()
+    if interrupted:
+        with st.container(border=True):
+            comp = interrupted.get("company", "IPO")
+            done_count = len(interrupted.get("processed", []))
+            tot_count = interrupted.get("total", 0)
+            st.warning(
+                f"**Interrupted batch detected:** An incomplete application run for **{comp}** "
+                f"({done_count}/{tot_count} processed) was stopped previously.",
+                icon=":material/history_toggle_off:",
+            )
+            c_r1, c_r2 = st.columns([1, 4])
+            with c_r1:
+                if st.button("Discard previous run", width="stretch", key="discard_wal_btn"):
+                    history_mgr.clear_checkpoint()
+                    st.rerun()
+
     # Pre-render state updates to prevent StreamlitWidgetAlreadyInstantiatedError
     if st.session_state.pop("trigger_select_all_act", False):
         for i in range(len(accounts)):
@@ -287,13 +305,25 @@ def _execute_application_run(
 
     executor.mode = mode
 
+    if not dry_run:
+        history_mgr.start_checkpoint(
+            company_name=target_company,
+            engine="API" if mode == "api" else "Playwright",
+            total=total,
+            accounts=[{"name": a.get("name", ""), "username": a.get("username", "")} for a in selected_accounts],
+        )
+
     for idx, acc in enumerate(selected_accounts, start=1):
         name = acc.get("name", f"Account #{idx}")
         progress_pct = int(((idx - 1) / total) * 100)
         progress_bar.progress(progress_pct, text=f"Processing {name} ({idx}/{total})...")
 
-        acc_kitta = int(acc.get("kitta", override_kitta)) if str(acc.get("kitta", "")).isdigit() and int(acc.get("kitta", 0)) > 0 else override_kitta
-        apply_kitta = override_kitta if override_kitta != 10 else acc_kitta
+        # Determine kitta: use account's specific kitta if defined, else use override/global kitta
+        acc_kitta_val = str(acc.get("kitta", "")).strip()
+        if acc_kitta_val.isdigit() and int(acc_kitta_val) > 0:
+            apply_kitta = int(acc_kitta_val)
+        else:
+            apply_kitta = override_kitta
 
         if mode == "api":
             status, msg = executor._apply_via_api(acc, target_company, apply_kitta, dry_run=dry_run)
@@ -319,6 +349,8 @@ def _execute_application_run(
             "timestamp": time.strftime("%H:%M:%S"),
         }
         details_log.append(detail)
+        if not dry_run:
+            history_mgr.update_checkpoint(detail)
 
         # Categorize
         badge_color: Literal["red", "orange", "yellow", "blue", "green", "violet", "gray", "grey", "primary"]
@@ -380,6 +412,7 @@ def _execute_application_run(
 
     # Log to History Manager if not pure dry run
     if not dry_run:
+        history_mgr.clear_checkpoint()
         history_mgr.log_run(
             company_name=target_company,
             engine="API" if mode == "api" else "Playwright",

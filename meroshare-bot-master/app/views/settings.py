@@ -1,12 +1,38 @@
-"""Settings and preferences view for Meroshare AutoPilot."""
+"""Settings and preferences view for Meroshare AutoPilot with config.ini persistence."""
 
 from __future__ import annotations
 
+import configparser
 import sys
+from pathlib import Path
 
 import streamlit as st
 
 from bot.notifications import test_telegram_connection
+
+
+def _get_config_path() -> Path:
+    candidates = [
+        Path.cwd() / "config.ini",
+        Path.cwd() / "meroshare-bot-master" / "config.ini",
+        Path(__file__).resolve().parent.parent.parent / "config.ini",
+    ]
+    return next((p for p in candidates if p.exists()), candidates[0])
+
+
+def _load_config() -> configparser.ConfigParser:
+    config = configparser.ConfigParser()
+    p = _get_config_path()
+    if p.exists():
+        config.read(str(p), encoding="utf-8")
+    return config
+
+
+def _save_config(config: configparser.ConfigParser) -> None:
+    p = _get_config_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("w", encoding="utf-8") as f:
+        config.write(f)
 
 
 def render_settings_view() -> None:
@@ -142,30 +168,55 @@ def render_settings_view() -> None:
         st.markdown("### Mobile notifications")
         st.caption("Receive instant batch completion summaries directly on Telegram.")
 
-        st.session_state.telegram_token = st.text_input(
+        config = _load_config()
+        saved_tok = config.get("telegram", "bot_token", fallback="") if config.has_section("telegram") else ""
+        saved_cid = config.get("telegram", "chat_id", fallback="") if config.has_section("telegram") else ""
+
+        curr_tok = st.session_state.get("telegram_token") or saved_tok
+        curr_cid = st.session_state.get("telegram_chat_id") or saved_cid
+
+        tok_input = st.text_input(
             "Telegram bot token",
-            value=st.session_state.get("telegram_token", ""),
+            value=curr_tok,
             type="password",
             placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+            key="settings_tg_token_field",
         )
-        st.session_state.telegram_chat_id = st.text_input(
+        cid_input = st.text_input(
             "Telegram chat ID",
-            value=st.session_state.get("telegram_chat_id", ""),
+            value=curr_cid,
             placeholder="e.g. 987654321",
+            key="settings_tg_cid_field",
         )
 
-        if st.button("Send test alert", icon=":material/send:", width="content"):
-            tok = st.session_state.telegram_token.strip()
-            cid = st.session_state.telegram_chat_id.strip()
-            if tok and cid:
-                with st.spinner("Dispatching test alert..."):
-                    ok, msg = test_telegram_connection(tok, cid)
-                    if ok:
-                        st.success("Test notification delivered successfully to Telegram.", icon=":material/check_circle:")
-                    else:
-                        st.error(f"Failed to send alert: {msg}", icon=":material/error:")
-            else:
-                st.warning("Please specify both Bot Token and Chat ID.", icon=":material/warning:")
+        st.session_state.telegram_token = tok_input
+        st.session_state.telegram_chat_id = cid_input
+
+        # Save to config.ini button
+        c_btn1, c_btn2 = st.columns([1, 1])
+        with c_btn1:
+            if st.button("Save Notifications to config.ini", icon=":material/save:", width="stretch"):
+                if not config.has_section("telegram"):
+                    config.add_section("telegram")
+                config.set("telegram", "enabled", "true" if tok_input and cid_input else "false")
+                config.set("telegram", "bot_token", tok_input)
+                config.set("telegram", "chat_id", cid_input)
+                _save_config(config)
+                st.success("Telegram credentials persisted to config.ini!", icon=":material/check_circle:")
+
+        with c_btn2:
+            if st.button("Send test alert", icon=":material/send:", width="stretch"):
+                tok = tok_input.strip()
+                cid = cid_input.strip()
+                if tok and cid:
+                    with st.spinner("Dispatching test alert..."):
+                        ok, msg = test_telegram_connection(tok, cid)
+                        if ok:
+                            st.success("Test notification delivered successfully to Telegram.", icon=":material/check_circle:")
+                        else:
+                            st.error(f"Failed to send alert: {msg}", icon=":material/error:")
+                else:
+                    st.warning("Please specify both Bot Token and Chat ID.", icon=":material/warning:")
 
     # System Diagnostics & Info
     with st.container(border=True):

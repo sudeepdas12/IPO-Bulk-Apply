@@ -158,6 +158,31 @@ def test_account_manager_preserves_masked_secrets():
         assert ok_dec is True
         assert mgr.is_vault_encrypted() is False
         assert "TruePassword123" in tf_path.read_text(encoding="utf-8")
+
+        # Test AES-256-GCM Master Passphrase encryption
+        master_pwd = "SuperSecretMasterKey!@#2026"
+        ok_gcm = mgr.encrypt_vault(master_passphrase=master_pwd)
+        assert ok_gcm is True
+        assert mgr.is_vault_encrypted() is True
+
+        gcm_text = tf_path.read_text(encoding="utf-8")
+        assert "GCM:" in gcm_text
+        assert "TruePassword123" not in gcm_text
+
+        # Correct passphrase decrypts accurately
+        mgr_auth = AccountManager(file_path=tf_path, master_passphrase=master_pwd)
+        loaded_gcm = mgr_auth.load_accounts()
+        assert loaded_gcm[0]["password"] == "TruePassword123"
+
+        # Wrong passphrase fails cleanly and triggers Read-Only Lock guard
+        mgr_wrong = AccountManager(file_path=tf_path, master_passphrase="WrongPassword")
+        health = mgr_wrong.check_vault_health()
+        assert health["cross_machine_locked"] is True
+        assert health["failed_count"] == 1
+
+        import pytest
+        with pytest.raises(PermissionError):
+            mgr_wrong.save_accounts([{"name": "Hacker"}])
     finally:
         if tf_path.exists():
             tf_path.unlink()

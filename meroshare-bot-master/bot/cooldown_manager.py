@@ -8,6 +8,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+try:
+    from filelock import FileLock
+    HAS_FILELOCK = True
+except ImportError:
+    HAS_FILELOCK = False
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_COOLDOWN_MINUTES = 15
@@ -22,6 +28,12 @@ class CooldownManager:
             self.file_path = base_dir / "data" / "cdsc_cooldown.json"
         else:
             self.file_path = Path(file_path)
+        self.lock_path = self.file_path.parent / "cooldown.lock"
+
+    def _get_lock(self) -> Any:
+        if HAS_FILELOCK:
+            return FileLock(str(self.lock_path), timeout=5)
+        return None
 
     def load_state(self) -> Dict[str, Any]:
         """Load the persisted cooldown status."""
@@ -77,8 +89,14 @@ class CooldownManager:
 
         try:
             self.file_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.file_path.open("w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2)
+            lock = self._get_lock()
+            if lock:
+                with lock:
+                    with self.file_path.open("w", encoding="utf-8") as f:
+                        json.dump(state, f, indent=2)
+            else:
+                with self.file_path.open("w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
             logger.warning("CDSC IP Cooldown recorded: expires at %s (reason: %s)", expires, reason)
         except Exception as exc:
             logger.error("Failed to persist cooldown state: %s", exc)
@@ -90,8 +108,14 @@ class CooldownManager:
         state = {"active": False, "reason": "Manually cleared or expired", "cleared_at": datetime.datetime.now().isoformat()}
         try:
             self.file_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.file_path.open("w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2)
+            lock = self._get_lock()
+            if lock:
+                with lock:
+                    with self.file_path.open("w", encoding="utf-8") as f:
+                        json.dump(state, f, indent=2)
+            else:
+                with self.file_path.open("w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
         except Exception as exc:
             logger.warning("Could not clear cooldown file: %s", exc)
 

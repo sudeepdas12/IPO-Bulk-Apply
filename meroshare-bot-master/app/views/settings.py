@@ -40,28 +40,49 @@ def render_settings_view() -> None:
     st.title("Settings")
     st.caption("Configure runtime behavior, mobile notifications, and system parameters.")
 
+    config = _load_config()
+
     # Execution Engine Configuration
     with st.container(border=True):
         st.markdown("### Execution parameters")
         st.caption("Fine-tune connection timeouts and execution pacing.")
 
+        saved_engine = config.get("general", "engine", fallback="api").lower()
+        engine_options = ["Direct REST API (Instant)", "Playwright Browser (Browser Automation)"]
+        default_engine_idx = 1 if "playwright" in saved_engine else 0
+
+        saved_fast = config.getboolean("general", "fast_mode", fallback=False)
+
         s_col1, s_col2 = st.columns(2)
         with s_col1:
-            st.selectbox(
+            chosen_engine = st.selectbox(
                 "Default execution engine",
-                options=["Direct REST API (Instant)", "Playwright Browser (Browser Automation)"],
-                index=0,
+                options=engine_options,
+                index=default_engine_idx,
+                key="settings_engine_select",
                 help="REST API is ultra-fast and recommended. Playwright runs Chromium.",
             )
         with s_col2:
-            st.slider(
+            pace_delay = st.slider(
                 "Inter-account pacing delay (seconds)",
                 min_value=0.05,
                 max_value=2.0,
-                value=0.2,
+                value=0.1 if saved_fast else 0.25,
                 step=0.05,
+                key="settings_pace_delay_slider",
                 help="Gentle delay between submitting different applicant accounts to avoid server throttling.",
             )
+
+        c_save_exec, _ = st.columns([1.5, 3])
+        with c_save_exec:
+            if st.button("Save Execution Preferences", icon=":material/save:", width="stretch"):
+                if not config.has_section("general"):
+                    config.add_section("general")
+                new_engine_val = "playwright" if "Playwright" in chosen_engine else "api"
+                config.set("general", "engine", new_engine_val)
+                config.set("general", "fast_mode", "true" if pace_delay <= 0.1 else "false")
+                _save_config(config)
+                st.toast("Execution parameters saved to config.ini", icon="💾")
 
     # Vault Security & Encryption At Rest
     from bot.account_manager import AccountManager
@@ -202,6 +223,7 @@ def render_settings_view() -> None:
                 config.set("telegram", "bot_token", tok_input)
                 config.set("telegram", "chat_id", cid_input)
                 _save_config(config)
+                st.toast("Telegram credentials persisted to config.ini!", icon="💾")
                 st.success("Telegram credentials persisted to config.ini!", icon=":material/check_circle:")
 
         with c_btn2:

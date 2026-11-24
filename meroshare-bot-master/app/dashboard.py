@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
+
+# Fix Windows Proactor pipe connection lost noise
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
 
 # Add project root and meroshare-bot-master to sys.path
 root_dir = Path(__file__).resolve().parent.parent
